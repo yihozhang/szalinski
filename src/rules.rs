@@ -136,15 +136,15 @@ pub fn rules() -> Vec<Rewrite> {
 
         rw!("fold_op"; "(Fold ?bop (Affine ?aff ?param ?cad))"=> "(Affine ?aff ?param (Fold ?bop ?cad))"),
 
-        rw!("union_trans"; "(Union (Trans ?x ?y ?z ?a) (Trans ?x ?y ?z ?b))"=> "(Trans ?x ?y ?z (Union ?a ?b))"),
+        rw!("union_trans"; "(Binop Union (Affine Trans (Vec3 ?x ?y ?z) ?a) (Affine Trans (Vec3 ?x ?y ?z) ?b))"=> "(Affine Trans (Vec3 ?x ?y ?z) (Binop Union ?a ?b))"),
 
-        rw!("inter_empty"; "(Inter ?a Empty)"=> "Empty"),
+        rw!("inter_empty"; "(Binop Inter ?a Empty)"=> "Empty"),
 
         // idempotent
-        rw!("union_same"; "(Union ?a ?a)"=> "?a"),
-        rw!("inter_same"; "(Inter ?a ?a)"=> "?a"),
+        rw!("union_same"; "(Binop Union ?a ?a)"=> "?a"),
+        rw!("inter_same"; "(Binop Inter ?a ?a)"=> "?a"),
 
-        rw!("inter_union"; "(Inter ?a (Union ?a ?b))"=> "?a"),
+        rw!("inter_union"; "(Binop Inter ?a (Binop Union ?a ?b))"=> "?a"),
         rw!("repeat_mapi"; "(Repeat ?n ?x)"=> "(MapI ?n ?x)"),
     ];
 
@@ -158,14 +158,6 @@ pub fn rules() -> Vec<Rewrite> {
               (Affine Scale (Vec3 ?a ?b ?c) ?m))"),
 
             rw!("trans_scale"; "(Affine Trans (Vec3 ?x ?y ?z) (Affine Scale (Vec3 ?a ?b ?c) ?m))"=> "(Affine Scale (Vec3 ?a ?b ?c) (Affine Trans (Vec3 (/ ?x ?a) (/ ?y ?b) (/ ?z ?c)) ?m))"),
-
-            // rw("scale_rotate",
-            //    "(Scale (Vec3 ?a ?a ?a) (Rotate (Vec3 ?x ?y ?z) ?m))",
-            //    "(Rotate (Vec3 ?x ?y ?z) (Scale (Vec3 ?a ?a ?a) ?m))"),
-
-            // rw("rotate_scale",
-            //    "(Scale (Vec3 ?a ?a ?a) (Rotate (Vec3 ?x ?y ?z) ?m))",
-            //    "(Rotate (Vec3 ?x ?y ?z) (Scale (Vec3 ?a ?a ?a) ?m))"),
 
             // primitives
 
