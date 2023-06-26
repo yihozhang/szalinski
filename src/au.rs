@@ -237,6 +237,7 @@ impl AU {
                         .zip(b.children().iter())
                         .map(|(a, b)| self.anti_unify_class(egraph, &(*a, *b)).clone())
                         .multi_cartesian_product()
+                        .take(1)
                         .map(|xs| {
                             let mut children = vec![];
                             let mut args1 = vec![];

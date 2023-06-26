@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::{fmt::Debug, str::FromStr};
 
 use crate::au::ArgList;
@@ -557,11 +558,12 @@ fn get_au_groups(
     let mut au_groups = HashMap::<CadCtx, HashMap<Id, Vec<Num>>>::default();
 
     // TODO: handle repeated substructures (or do we?)
+    // eprintln!("argument length: {}", list.len());
     // Step 1: compute anti-unification
     for i in 0..list.len() {
         for j in i + 1..list.len() {
             let result = au.anti_unify_class(egraph, &(list[i], list[j]));
-            eprintln!("result.len: {}", result.len());
+            // eprintln!("result.len: {}", result.len());
             for (cad, args1, args2) in result {
                 if !au_groups.contains_key(cad) {
                     au_groups.insert(cad.clone(), HashMap::default());
