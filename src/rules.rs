@@ -401,30 +401,10 @@ pub fn reroll(egraph: &mut EGraph) {
                         }
                     }
                 }
-
-                // also add the dumb list that does no solving
-                // let col_len = anti_substs[0].len();
-                // let arr_of_cols = (0..col_len)
-                //     .map(|i| anti_substs.iter().map(|row| row[i]).collect_vec())
-                //     .collect_vec();
-                // let n = egraph.add(Cad::Num(anti_substs.len().into()));
-                // let arg_ids = arr_of_cols
-                //     .iter()
-                //     .map(|col| {
-                //         let elems = col.iter().map(|n| egraph.add(Cad::Num(*n))).collect_vec();
-                //         let list_id = egraph.add(Cad::List(elems));
-                //         let var_id = egraph.add(Cad::ListVar(ListVar("i0".into())));
-                //         egraph.add(Cad::GetAt([list_id, var_id]))
-                //     })
-                //     .collect_vec();
-                // let no_solving =
-                //     SolveResult::from_loop_params(vec![n], arg_ids).assemble(egraph, &template);
-
-                // part_to_ids.entry(ids).or_default().push(no_solving);
             }
 
             // Step 4: try to combine different parts
-            let mut part_to_ids = part_to_ids
+            let part_to_ids = part_to_ids
                 .into_iter()
                 .filter_map(|(part, ids)| {
                     if ids.len() > 0 {
@@ -443,23 +423,20 @@ pub fn reroll(egraph: &mut EGraph) {
                 "start searching: option_len: {} list_len: {list_len}",
                 part_to_ids.len()
             );
-            part_to_ids.sort_by(|a, b| a.0.len().cmp(&b.0.len()).reverse());
 
             let mut singleton_part_to_ids = HashMap::new();
             for id in list.iter() {
                 let list_id = egraph.add(Cad::List(vec![*id]));
                 singleton_part_to_ids.insert(*id, list_id);
             }
+
             search_combinations_and_add(
-                &part_to_ids,
+                part_to_ids,
                 &singleton_part_to_ids,
                 egraph,
                 root_id,
-                &mut vec![],
-                &mut HashSet::default(),
-                0,
                 list_len,
-                3,
+                100,
             );
         }
     }
@@ -468,53 +445,122 @@ pub fn reroll(egraph: &mut EGraph) {
 }
 
 fn search_combinations_and_add(
+    mut part_to_ids: Vec<(Vec<Id>, Id)>,
+    singleton_part_to_ids: &HashMap<Id, Id>,
+    egraph: &mut EGraph,
+    root_id: Id,
+    list_len: usize,
+    mut fuel: i64,
+) {
+    part_to_ids.sort_by(|a, b| a.0.len().cmp(&b.0.len()).reverse());
+
+    let mut covered_by = HashMap::<Id, HashSet<Id>>::new();
+
+    for (part, id) in part_to_ids.iter() {
+        for part_id in part {
+            covered_by.entry(*part_id).or_default().insert(*id);
+        }
+    }
+
+    let mut disabled_parts = HashMap::<Id, usize>::default();
+    for (_part, id) in part_to_ids.iter() {
+        disabled_parts.insert(*id, 0);
+    }
+
+    search_combinations_and_add_impl(
+        &part_to_ids,
+        &singleton_part_to_ids,
+        egraph,
+        root_id,
+        &mut vec![],
+        0,
+        &covered_by,
+        &mut disabled_parts,
+        0,
+        list_len,
+        3,
+        &mut fuel,
+    );
+}
+
+fn search_combinations_and_add_impl(
     part_to_ids: &[(Vec<Id>, Id)],
     singleton_part_to_ids: &HashMap<Id, Id>,
     egraph: &mut EGraph,
     root_id: Id,
     // part ids that are used
     cur_buffer: &mut Vec<Id>,
-    ids_covered: &mut HashSet<Id>,
+    // current position
     cur_pos: usize,
+    // a reverted index on the mapping from part to id that covers this part
+    covered_by: &HashMap<Id, HashSet<Id>>,
+    // parts that are disabled by parts in cur_buffer
+    disabled_parts: &mut HashMap<Id, usize>,
+    // the size of parts covered
+    covered_size: usize,
+    // the size to target
     target_size: usize,
     limit: usize,
+    fuel: &mut i64,
 ) {
-    let todo_size = target_size - ids_covered.len();
-    if limit == 0 || todo_size == 0 {
-        // fill with singleton list
-        let mut cur_buffer = cur_buffer.clone();
-        for (part, id) in singleton_part_to_ids {
-            if !ids_covered.contains(part) {
-                cur_buffer.push(*id);
+    if *fuel < 0 {
+        return;
+    }
+    if limit == 0 || covered_size == target_size {
+        // fill the rest of missing pieces with singleton list
+        let mut result = cur_buffer.clone();
+        for (part_id, id) in singleton_part_to_ids {
+            if cur_buffer
+                .iter()
+                .all(|id| covered_by.contains_key(part_id) && !covered_by[part_id].contains(id))
+            {
+                result.push(*id);
             }
         }
         // insert into the e-graph
-        if cur_buffer.len() == 1 {
-            egraph.union(root_id, cur_buffer[0]);
+        if result.len() == 1 {
+            egraph.union(root_id, result[0]);
         } else {
-            let list_id = egraph.add(Cad::List(cur_buffer));
+            let list_id = egraph.add(Cad::List(result));
             let concat_id = egraph.add(Cad::Concat([list_id]));
             egraph.union(root_id, concat_id);
         }
+        *fuel -= 1;
     } else {
         // for i in cur_pos..(part_to_ids.len() - todo_size + 1) {
         for i in cur_pos..part_to_ids.len() {
             let (part, id) = &part_to_ids[i];
-            if part.iter().all(|id| !ids_covered.contains(id)) {
+            if disabled_parts[id] == 0 {
                 cur_buffer.push(*id);
-                ids_covered.extend(part);
-                search_combinations_and_add(
+                for part_id in part {
+                    for id in covered_by[part_id].iter() {
+                        *disabled_parts.get_mut(id).unwrap() += 1;
+                    }
+                }
+
+                search_combinations_and_add_impl(
                     part_to_ids,
                     singleton_part_to_ids,
                     egraph,
                     root_id,
                     cur_buffer,
-                    ids_covered,
                     i + 1,
+                    covered_by,
+                    disabled_parts,
+                    covered_size + part.len(),
                     target_size,
                     limit - 1,
+                    fuel,
                 );
-                part.iter().for_each(|id| assert!(ids_covered.remove(id)));
+                if *fuel < 0 {
+                    return;
+                }
+
+                for part_id in part {
+                    for id in covered_by[part_id].iter() {
+                        *disabled_parts.get_mut(id).unwrap() -= 1;
+                    }
+                }
                 cur_buffer.pop();
             }
         }
