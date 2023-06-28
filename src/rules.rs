@@ -1,7 +1,9 @@
+use std::cmp::max;
 use std::io::Write;
 use std::{fmt::Debug, str::FromStr};
 
 use crate::au::ArgList;
+use crate::cad::println_cad;
 use crate::permute::{Partitioning, Permutation};
 use crate::solve::solve;
 use crate::{
@@ -11,6 +13,8 @@ use crate::{
 };
 use egg::{rewrite as rw, *};
 use itertools::Itertools;
+use rand::prelude::Distribution;
+use rand::thread_rng;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 fn is_not_zero(var: &'static str) -> impl Fn(&mut EGraph, Id, &Subst) -> bool {
@@ -367,7 +371,10 @@ pub fn reroll(egraph: &mut EGraph) {
     for m in matches {
         for subst in &m.substs {
             let root_id = subst[list_var];
-            let list = egraph[root_id].data.list.as_ref().unwrap().clone();
+            let list = match egraph[root_id].data.list.as_ref() {
+                Some(list) => list.clone(),
+                None => continue,
+            };
             let list_len = list.len();
 
             // Step 3: compute and build rerolled exprs
@@ -381,7 +388,6 @@ pub fn reroll(egraph: &mut EGraph) {
                 // compute all possible partition of the list
                 let part_perms = get_all_part_perms(&anti_substs);
 
-                // eprintln!("part_perms.len(): {}", part_perms.len());
                 // Solve for each partition
                 for (part, perm) in part_perms {
                     let anti_substs_parts: Vec<Vec<ArgList>> =
@@ -435,7 +441,7 @@ pub fn reroll(egraph: &mut EGraph) {
                 &singleton_part_to_ids,
                 egraph,
                 root_id,
-                list_len,
+                singleton_part_to_ids.len(),
                 100,
             );
         }
@@ -449,7 +455,7 @@ fn search_combinations_and_add(
     singleton_part_to_ids: &HashMap<Id, Id>,
     egraph: &mut EGraph,
     root_id: Id,
-    list_len: usize,
+    target_size: usize,
     mut fuel: i64,
 ) {
     part_to_ids.sort_by(|a, b| a.0.len().cmp(&b.0.len()).reverse());
@@ -477,7 +483,7 @@ fn search_combinations_and_add(
         &covered_by,
         &mut disabled_parts,
         0,
-        list_len,
+        target_size,
         3,
         &mut fuel,
     );
@@ -604,20 +610,53 @@ fn get_au_groups(
     let mut au_groups = HashMap::<CadCtx, HashMap<Id, Vec<Num>>>::default();
 
     // TODO: handle repeated substructures (or do we?)
-    // eprintln!("argument length: {}", list.len());
+    eprintln!("list length: {}", list.len());
+    // TODO: don't hard code constants
     // Step 1: compute anti-unification
-    for i in 0..list.len() {
-        for j in i + 1..list.len() {
-            let result = au.anti_unify_class(egraph, &(list[i], list[j]));
-            // eprintln!("result.len: {}", result.len());
-            for (cad, args1, args2) in result {
-                if !au_groups.contains_key(cad) {
-                    au_groups.insert(cad.clone(), HashMap::default());
+    if list.len() < 500 {
+        for i in 0..list.len() {
+            for j in i + 1..list.len() {
+                let result = au.anti_unify_class(egraph, &(list[i], list[j]));
+                // eprintln!("result.len: {}", result.len());
+                for (cad, args1, args2) in result {
+                    if !au_groups.contains_key(cad) {
+                        au_groups.insert(cad.clone(), HashMap::default());
+                    }
+                    let map = au_groups.get_mut(cad).unwrap();
+                    map.entry(list[i]).or_insert_with(|| args1.clone());
+                    map.entry(list[j]).or_insert_with(|| args2.clone());
                 }
-                let map = au_groups.get_mut(cad).unwrap();
-                map.entry(list[i]).or_insert_with(|| args1.clone());
-                map.entry(list[j]).or_insert_with(|| args2.clone());
             }
+        }
+    } else {
+        // If # arguments is too big, we sample a small set of pairs
+        // to heuristically find possible templates (and a canonical e-class for each template)
+        let mut rng = thread_rng();
+        let uniform = rand::distributions::Uniform::new(0, list.len());
+        let (mut success_times, mut try_times) = (0, 0);
+        // we want # templates * # parametrization to be close to 100_000
+        let template_limit = max(100_000 / list.len(), 5);
+        let mut templates = HashSet::<CadCtx>::default();
+        while success_times < template_limit && try_times < 100_000 {
+            let i = uniform.sample(&mut rng);
+            let j = uniform.sample(&mut rng);
+            let result = au.anti_unify_class(egraph, &(list[i], list[j]));
+            for (cad, _, _) in result {
+                templates.insert(cad.clone());
+                success_times += 1;
+            }
+            try_times += 1;
+        }
+        for cad in templates {
+            println!("{:?}", &cad);
+            let mut map = HashMap::<Id, Vec<Num>>::default();
+            for i in 0..list.len() {
+                let result = cad.get_params(egraph, list[i]);
+                if let Some(result) = result {
+                    map.entry(list[i]).or_insert(result);
+                }
+            }
+            au_groups.insert(cad, map);
         }
     }
     if au_groups.len() == 0 {

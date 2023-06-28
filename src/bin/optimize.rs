@@ -384,7 +384,6 @@ fn main() {
 
     runner.print_report();
     let runner = reroll_and_run(runner, &rules);
-    let runner = reroll_and_run(runner, &rules);
 
     info!(
         "Stopping after {} iters: {:?}",
@@ -402,7 +401,7 @@ fn main() {
         runner.egraph.number_of_classes(),
         runner.egraph.total_number_of_nodes()
     );
-    println!("Best ({}): {}", best.0, best.1.pretty(80));
+    // println!("Best ({}): {}", best.0, best.1.pretty(80));
 
     let report = RunResult {
         initial_expr: initial_expr.pretty(80),
